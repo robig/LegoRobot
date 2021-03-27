@@ -3,6 +3,7 @@ from pylgbst.hub import MoveHub
 from robot import *
 from time import sleep
 from csv import reader
+from os import path
 import six
 
 BTN_FORWARD=19
@@ -29,13 +30,16 @@ DOWN = -1
 running = True
 processing = False
 
-STEP_X=20
-STEP_Y=15
+global STEP_X, STEP_Y, STEP_Z, SPEED_X, SPEED_Y, CURR_X, CURR_Y, CURR_Z
+STEP_X=-8
+STEP_Y=20
 STEP_Z=25 #PEN
 SPEED_X=SPEED_Y=0.3
 SPEED_Z=0.5
 
-CURR_X = CURR_Y = 0
+CURR_X = 0
+CURR_Y = 0
+CURR_Z = 0
 CURR_CMD = 0
 lastFile='plot2.csv'
 
@@ -54,38 +58,57 @@ def readCommands(filename):
     return []
 
 def cmdPenUp(robot):
-    global STEP_Z
+    global STEP_Z, CURR_Y, SPEED_Z
     print("* Pen up")
+    #CURR_Z=CURR_Z+STEP_Z
     robot.motor_external.angled(STEP_Z, SPEED_Z)
 
 def cmdPenDown(robot):
-    global STEP_Z
+    global STEP_Z, CURR_Z, SPEED_Z
     print("* Pen down")
+    CURR_Z=CURR_Z-STEP_Z
     robot.motor_external.angled(STEP_Z, -SPEED_Z)
 
 def cmdMove(robot, x, y):
-    global STEP_X, STEP_Y, CURR_X, CURR_Y
+    global STEP_X, STEP_Y, CURR_X, CURR_Y, SPEED_X, SPEED_Y
     print("* Move +%s,+%s" % (x, y) )
-    if x != 0:
-        robot.motor_B.angled(x * STEP_X, SPEED_X)
-    if y != 0:
-        robot.motor_A.angled(y * STEP_Y, SPEED_Y)
+    if x != 0 and y != 0:
+        print("2x MOVE")
+        t=x*STEP_X
+        t2=y*STEP_Y
+        fac=x/y
+        sx=SPEED_X #SPEED_X == 1
+        sy=SPEED_Y*fac #SPEED Y == fac
+        if x<y:
+            t=y*STEP_Y
+            t2=x*STEP_X
+            fac=y/x
+            sx=SPEED_X * fac
+            sy=SPEED_Y
+        print("motor_AB(%f, %f, %f) fac=%f" % (t, sx, sy, fac))
+        robot.motor_AB.timed(SPEED_X, -sx, sy)
+    elif x != 0:
+        robot.motor_A.angled(x * STEP_X, SPEED_X)
+    elif y != 0:
+        robot.motor_B.angled(y * STEP_Y, SPEED_Y)
     CURR_X=CURR_X+x
     CURR_Y=CURR_Y+y
 
 def cmdAbs(robot, x, y):
     global CURR_X, CURR_Y, STEP_X, STEP_Y
     print("* Move to %s,%s" % (x, y) )
-    diff_x=CURR_X - x
-    diff_y=CURR_Y - y
+    diff_x=- CURR_X - x
+    diff_y=- CURR_Y - y
+    print(" diff: %i,%i" % (diff_x, diff_y))
     if diff_x != 0:
-        robot.motor_B.angled(diff_x * STEP_X, SPEED_X)
+        robot.motor_A.angled(diff_x * STEP_X, SPEED_X)
     if diff_y != 0:
-        robot.motor_A.angled(diff_y * STEP_Y, SPEED_Y)
+        robot.motor_B.angled(diff_y * STEP_Y, SPEED_Y)
     CURR_X=x
     CURR_Y=y
 
 def processCommand(robot, cmd):
+    global CURR_X, CURR_Y
     if len(cmd)>0:
         if cmd[0] == "PEN" and cmd[1] == "UP":
             cmdPenUp(robot)
@@ -107,9 +130,11 @@ def processCommand(robot, cmd):
             cmdMove(robot, x, y)
 
         if cmd[0] == "ZERO":
-            global CURR_X, CURR_Y
             CURR_X=0
             CURR_Y=0
+
+        if cmd[0] == "POS":
+            print("Current position: %i,%i" % (CURR_X, CURR_Y) )
 
 robot.setMotorCallback(motorCallback)
 
@@ -133,17 +158,23 @@ try:
                 inp = six.moves.input("> ")
                 cmd = inp.split(" ")
                 processCommand(robot, cmd)
+
+
                 if inp == "q":
                     break
-            break
+            continue
 
         if inp == "q":
             break
 
         if inp == "":
             inp = lastFile
-        else:
-            lastFile = inp
+        
+        if not path.exists(inp):
+            print("File not found: %s" % inp)
+            continue
+
+        lastFile = inp
 
         print("Reading commands from file...")
         commands = readCommands(inp)
